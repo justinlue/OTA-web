@@ -1,3 +1,22 @@
 # Project timeline: key designs and changes, rendered by `pgraph render`.
 # Schema: D:/Workshop/project-graph/docs/superpowers/specs/2026-10-21-project-graph-design.md
 trunk = "main"
+
+[[nodes]]
+id = "2026-10-25-ota-web-ui-design-and-mqtt-protocol"
+date = 2026-10-25
+kind = "design"
+title = "OTA web UI design and MQTT protocol"
+summary = "Frontend-only OTA console: browser speaks MQTT over WSS to the broker; retained device status/ota topics, shared batch manifest with an owner lease, watchdog verdicts derived, never stored."
+branch = "main"
+commit = "1ffcd82c125c"
+docs = ["docs/superpowers/specs/2026-10-25-ota-webui-design.md", "docs/superpowers/plans/2026-10-25-ota-webui.md", "docs/protocol.md"]
+
+[[nodes]]
+id = "2026-10-25-ota-web-ui-v1"
+date = 2026-10-25
+kind = "feature"
+title = "OTA web UI v1"
+summary = "Device table with filters and paste selection, throttled batches with live progress, device-reported failure causes and retry, shared firmware catalog, built-in simulator; verified against a live aedes broker."
+branch = "main"
+commit = "673fe8185a62"
