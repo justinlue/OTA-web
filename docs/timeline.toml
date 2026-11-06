@@ -20,3 +20,22 @@ title = "OTA web UI v1"
 summary = "Device table with filters and paste selection, throttled batches with live progress, device-reported failure causes and retry, shared firmware catalog, built-in simulator; verified against a live aedes broker."
 branch = "main"
 commit = "673fe8185a62"
+
+[[nodes]]
+id = "2026-11-06-module-by-module-upgrade-design"
+date = 2026-11-06
+kind = "design"
+title = "Module-by-module upgrade design"
+summary = "Upgrades go per module (BLE, MCU, LTE, Sensor), replacing the single image: one job per device carries a modules list, one reboot; status reports per-module versions; legacy records read as MCU."
+branch = "main"
+commit = "a414b58f87af"
+docs = ["docs/superpowers/specs/2026-11-06-module-upgrades.md", "docs/protocol.md"]
+
+[[nodes]]
+id = "2026-11-06-module-by-module-upgrades"
+date = 2026-11-06
+kind = "feature"
+title = "Module-by-module upgrades"
+summary = "Upgrade dialog picks modules and an image per module; each device gets only the modules it still needs; success, rollback and progress judged per module; simulator runs multi-module jobs."
+branch = "main"
+commit = "a414b58f87af"
