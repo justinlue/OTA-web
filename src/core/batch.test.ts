@@ -4,12 +4,12 @@ import { batchViews, inProgressCount, leaseIsStale, LEASE_STALE_MS, summarize } 
 import { DEFAULT_TIMEOUTS, type DeviceRecord } from './types';
 
 const NOW = 1_000_000;
-const fw = { version: '2.0.0', url: 'u', sha256: 's', size: 1, models: [], notes: '' };
+const fw = { module: 'lte' as const, version: '2.0.0', url: 'u', sha256: 's', size: 1, models: [], notes: '' };
 
 describe('summarize', () => {
   it('counts states and knows when a batch is done', () => {
     const m: BatchManifest = {
-      id: 'b', name: 'b', createdAt: 0, createdBy: '', firmware: fw, maxInFlight: 5,
+      id: 'b', name: 'b', createdAt: 0, createdBy: '', firmware: [fw], maxInFlight: 5,
       allowDowngrade: false, archived: false, rev: 1, writer: '',
       entries: {
         d1: { state: 'dispatched', jobId: 'b:d1:1', sentAt: NOW - 10, attempts: 1 },

@@ -1,7 +1,7 @@
 // The OTA column of the device table: which batch a device's current job belongs to, and
 // its effective state there.
 import type { BatchManifest } from '../protocol/types';
-import { jobView } from './jobState';
+import { jobView, targetVersions } from './jobState';
 import type { DeviceRecord, JobView, Timeouts } from './types';
 
 export type DeviceJobRef = { batchId: string; createdAt: number };
@@ -29,10 +29,9 @@ export function deviceJobView(
 ): JobView | null {
   const m = ref && batches.get(ref.batchId);
   const entry = m?.entries[device.id];
-  if (m && entry) return jobView(entry, device, m.firmware.version, now, t);
+  if (m && entry) return jobView(entry, device, targetVersions(m.firmware), now, t);
   const ota = device.ota;
   if (!ota) return null;
-  // No batch to tell us the target: trust the device's own "done".
-  const target = ota.phase === 'done' ? (device.status?.fw ?? '') : '';
-  return jobView({ state: 'dispatched', jobId: ota.jobId, sentAt: ota.ts, attempts: 1 }, device, target, now, t);
+  // No batch to tell us the targets: with none to check, the device's own "done" is trusted.
+  return jobView({ state: 'dispatched', jobId: ota.jobId, sentAt: ota.ts, attempts: 1 }, device, {}, now, t);
 }

@@ -9,7 +9,7 @@ import { topics } from '../protocol/topics';
 const url = process.env.OTA_TEST_BROKER;
 const prefix = `ota-live-${Date.now()}`;
 const t = topics(prefix);
-const fw = { version: '2.0.0', url: 'https://cdn/fw.bin', sha256: 'abc', size: 42, models: [], notes: '' };
+const fw = { module: 'mcu' as const, version: '2.0.0', url: 'https://cdn/fw.bin', sha256: 'abc', size: 42, models: [], notes: '' };
 
 const until = async (cond: () => boolean, ms = 5000) => {
   const end = Date.now() + ms;
@@ -41,7 +41,8 @@ describe.skipIf(!url)('MqttTransport against a live broker', () => {
       await report('downloading', { percent: 100 });
       await report('installing', { percent: 100 });
       await report('rebooting');
-      deviceFw = cmd.version;
+      // A device that predates modules: its single image is the MCU's.
+      deviceFw = cmd.modules[0].version;
       await status();
       await report('done');
     });
@@ -51,7 +52,7 @@ describe.skipIf(!url)('MqttTransport against a live broker', () => {
     await engine.connect();
     await until(() => engine.store.getState().devices.get(id)?.status?.online === true);
 
-    const batchId = engine.startBatch({ name: 'live', firmware: fw, deviceIds: [id], maxInFlight: 1, allowDowngrade: false });
+    const batchId = engine.startBatch({ name: 'live', firmware: [fw], deviceIds: [id], maxInFlight: 1, allowDowngrade: false });
     await until(() => (engine.tick(), engine.views(batchId).get(id)?.state === 'success'));
 
     // A second engine (another operator's tab) sees the retained batch and lease.

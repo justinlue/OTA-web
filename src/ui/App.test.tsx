@@ -42,14 +42,22 @@ describe('App on the simulator', () => {
     expect(screen.getByText('12 of 24 devices')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Select all matching (12)' }));
 
-    await user.click(screen.getByRole('button', { name: 'Start OTA… (12)' }));
+    await user.click(screen.getByRole('button', { name: 'Upgrade… (12)' }));
     const dialog = screen.getByRole('dialog');
-    // The simulator catalog offers 1.5.0 for LT-100; it is preselected as the best fit.
-    expect(within(dialog).getByRole('combobox')).toHaveValue('1.5.0');
+    // Nothing is upgraded until the operator picks modules.
+    expect(within(dialog).getByRole('button', { name: 'Start upgrade' })).toBeDisabled();
+    await user.click(within(dialog).getByRole('checkbox', { name: 'MCU' }));
+    await user.click(within(dialog).getByRole('checkbox', { name: 'Sensor' }));
+    // The simulator catalog has two MCU images for LT-100; 1.5.0 suits most of them and is preselected.
+    expect(within(dialog).getByLabelText('MCU image')).toHaveValue('1.5.0');
+    expect(within(dialog).getByLabelText('Sensor image')).toHaveValue('0.9.2');
+    expect(within(dialog).queryByLabelText('BLE image')).not.toBeInTheDocument();
     expect(within(dialog).getByText(/will be updated/)).toBeInTheDocument();
     await user.clear(within(dialog).getByRole('spinbutton'));
     await user.type(within(dialog).getByRole('spinbutton'), '4');
-    await user.click(within(dialog).getByRole('button', { name: 'Start OTA' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Start upgrade' }));
+    const started = [...engine.store.getState().batches.values()][0];
+    expect(started.firmware.map((f) => `${f.module} ${f.version}`)).toEqual(['mcu 1.5.0', 'sensor 0.9.2']);
 
     expect(location.hash).toMatch(/^#\/batches\/b-/);
     await waitFor(() => expect(screen.getByText('This tab is dispatching this batch.')).toBeInTheDocument());
@@ -86,7 +94,7 @@ describe('App on the simulator', () => {
 
     // Other views render.
     await user.click(screen.getByRole('link', { name: /^Batches/ }));
-    expect((await screen.findAllByRole('link', { name: /1\.5\.0 × 12/ })).length).toBeGreaterThan(0);
+    expect((await screen.findAllByRole('link', { name: 'MCU 1.5.0 + Sensor 0.9.2 × 12' })).length).toBeGreaterThan(0);
     await user.click(screen.getByRole('link', { name: 'Firmware' }));
     expect(screen.getByText('Firmware catalog')).toBeInTheDocument();
     expect(screen.getAllByText('LT-100').length).toBeGreaterThan(0);

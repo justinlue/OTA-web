@@ -1,4 +1,4 @@
-import type { DeviceStatus, OtaError, OtaReport, SkipReason } from '../protocol/types';
+import type { DeviceStatus, ModuleId, OtaError, OtaReport, SkipReason } from '../protocol/types';
 
 export type Timeouts = {
   /** No report for the current job this long after sending → NO_ACK. */
@@ -40,6 +40,8 @@ export type JobView = {
   progress: number;
   /** Percent within the current phase, when the device reports one. */
   percent?: number;
+  /** The module a multi-module job is working on, when the device says. */
+  module?: ModuleId;
   error?: OtaError;
   reason?: SkipReason;
   /** Timestamp of the last change we know of. */

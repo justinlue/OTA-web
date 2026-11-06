@@ -1,6 +1,6 @@
 // Every user-visible string. English only for now; swap this module to localize.
 import type { JobState } from '../core/types';
-import type { SkipReason } from '../protocol/types';
+import { MODULE_LABELS, type SkipReason } from '../protocol/types';
 import type { ConnState } from '../transport/types';
 
 export const S = {
@@ -14,6 +14,7 @@ export const S = {
     error: 'Connection error',
   } satisfies Record<ConnState, string>,
   simulator: 'Simulator',
+  module: MODULE_LABELS,
   notConnected: 'Not connected to a broker.',
   goConnect: 'Open connection settings',
 
@@ -54,7 +55,7 @@ export const S = {
     selectMatching: (n: number) => `Select all matching (${n})`,
     clearSelection: 'Clear selection',
     pasteIds: 'Paste IDs…',
-    startOta: (n: number) => `Start OTA… (${n})`,
+    upgrade: (n: number) => `Upgrade… (${n})`,
     count: (shown: number, total: number) => `${shown} of ${total} devices`,
     cols: { id: 'Device ID', model: 'Model', online: 'Status', fw: 'Firmware', ota: 'OTA', seen: 'Last seen' },
     empty: 'No devices have announced themselves yet.',
@@ -68,9 +69,12 @@ export const S = {
     selected: (n: number) => `${n} devices selected`,
   },
   start: {
-    title: (n: number) => `Start OTA on ${n} device${n === 1 ? '' : 's'}`,
-    firmware: 'Firmware',
-    pickFirmware: 'Choose firmware…',
+    title: (n: number) => `Upgrade ${n} device${n === 1 ? '' : 's'}`,
+    modules: 'Modules to upgrade',
+    modulesHint: 'Each device gets the chosen modules it is not already running, in one job with one reboot.',
+    noImages: 'no images in the catalog',
+    image: (module: string) => `${module} image`,
+    pickModules: 'Choose at least one module.',
     noCatalog: 'The firmware catalog is empty. Add an entry on the Firmware page first.',
     name: 'Batch name',
     namePlaceholder: 'Optional, e.g. "LT-100 1.5.0 wave 1"',
@@ -81,7 +85,7 @@ export const S = {
     skipped: (n: number) => `${n} will be skipped`,
     recheck: 'Eligibility is checked again when each device’s turn comes.',
     keepOpen: 'Queued devices are only sent while this tab (or another operator who takes over) stays open.',
-    submit: 'Start OTA',
+    submit: 'Start upgrade',
     cancel: 'Cancel',
   },
   drawer: {
@@ -89,6 +93,7 @@ export const S = {
     model: 'Model',
     status: 'Status',
     firmware: 'Firmware',
+    modules: 'Modules',
     lastSeen: 'Last seen',
     batch: 'Batch',
     target: 'Target',
@@ -112,7 +117,7 @@ export const S = {
     title: 'Batches',
     active: 'Active',
     archived: 'Archived',
-    empty: 'No batches yet. Select devices and choose "Start OTA…".',
+    empty: 'No batches yet. Select devices and choose "Upgrade…".',
     emptyArchived: 'No archived batches.',
     cols: { name: 'Batch', fw: 'Firmware', created: 'Created', by: 'By', progress: 'Progress', owner: 'Dispatcher' },
     thisTab: 'this tab',
@@ -147,11 +152,13 @@ export const S = {
     add: 'Add firmware',
     edit: 'Edit',
     delete: 'Delete',
-    confirmDelete: (v: string) => `Remove ${v} from the catalog? Running batches keep their own copy.`,
+    confirmDelete: (what: string) => `Remove ${what} from the catalog? Running batches keep their own copy.`,
     empty: 'No firmware yet.',
-    cols: { version: 'Version', models: 'Models', size: 'Size', url: 'URL', notes: 'Notes' },
+    cols: { module: 'Module', version: 'Version', models: 'Models', size: 'Size', url: 'URL', notes: 'Notes' },
     anyModel: 'any',
     form: {
+      module: 'Module',
+      pickModule: 'Choose a module…',
       version: 'Version',
       url: 'Image URL',
       sha256: 'SHA-256',
@@ -163,11 +170,12 @@ export const S = {
       cancel: 'Cancel',
     },
     errors: {
+      module: 'Choose a module.',
       version: 'Version is required.',
       url: 'URL must start with http:// or https://.',
       sha256: 'SHA-256 is required.',
       size: 'Size must be a positive whole number.',
-      duplicate: 'That version is already in the catalog.',
+      duplicate: 'That module already has this version in the catalog.',
     },
   },
   settings: {

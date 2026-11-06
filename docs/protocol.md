@@ -7,6 +7,21 @@ Unix epoch **milliseconds**; device clocks are expected to be network-synced.
 
 Every topic sits under a configurable prefix `P` (default `ota`).
 
+## Modules
+
+A device is upgraded module by module. The modules are:
+
+| Id | Name |
+|---|---|
+| `ble` | BLE |
+| `mcu` | MCU |
+| `lte` | LTE |
+| `sensor` | Sensor |
+
+Each module has its own version and its own images. One OTA job may update several
+modules. The device installs them in the order given in the command and reboots once at
+the end. The UI always lists them in the order of the table above.
+
 ## Topics
 
 | Topic | Publisher | Retained | QoS | Purpose |
@@ -28,22 +43,32 @@ deletes a retained record.
 On every connect, publish retained:
 
 ```json
-{ "online": true, "fw": "1.4.2", "model": "LT-100", "ts": 1761400000000 }
+{ "online": true, "fw": "1.4.2", "model": "LT-100", "ts": 1761400000000,
+  "modules": { "ble": "3.1.0", "mcu": "1.4.2", "lte": "2.0.4", "sensor": "0.9.1" } }
 ```
+
+`modules` gives the running version of each module. Upgrades and success checks use these
+versions. `fw` is an overall label for display only. A status without `modules` comes from a
+device that predates modules: the UI reads its `fw` as the MCU version. Unknown module ids
+are ignored.
 
 Set the MQTT **Last Will** to the same topic, retained, QoS 1, with payload
 `{"online": false}` (the full object is also fine). The UI keeps the last known `fw` and
 `model` when it receives a bare will.
 
-After an update reboots, publish a fresh status with the new `fw` **before** the final
-`done` report.
+After an update reboots, publish a fresh status with the new module versions **before**
+the final `done` report.
 
 ### Commands — `P/dev/{id}/cmd` (subscribe, QoS 1)
 
 ```json
 { "type": "ota", "jobId": "b-20261025-101500-x7k2:lt-100-00012:1",
-  "version": "1.5.0", "url": "https://fw.example.com/lt100/1.5.0.bin",
-  "sha256": "a3f1…e9", "size": 1843200 }
+  "modules": [
+    { "module": "ble", "version": "3.2.0", "url": "https://fw.example.com/ble/3.2.0.bin",
+      "sha256": "5e02…a0", "size": 412000 },
+    { "module": "lte", "version": "2.1.0", "url": "https://fw.example.com/lte/2.1.0.bin",
+      "sha256": "e4d8…77", "size": 3145728 }
+  ] }
 ```
 
 ```json
@@ -52,7 +77,14 @@ After an update reboots, publish a fresh status with the new `fw` **before** the
 
 - `jobId` is opaque to the device; echo it in every report for that job. Each retry is a
   new `jobId`.
-- Download the image from `url` yourself and check its SHA-256 and size.
+- There is no single-image form of this command any more. Devices on firmware that only
+  knows the old `{version, url, sha256, size}` command must be updated to this protocol
+  before the UI can upgrade them; until then they never answer and end as `NO_ACK`.
+- `modules` holds at least one image and never names a module twice. It lists only the
+  modules this device is not already running at that version, so it can be shorter than
+  the batch's list.
+- For each image in order: download it from `url` yourself, check its SHA-256 and size,
+  then install it. Reboot once, after the last module.
 - If a job is already running, reply to the new `jobId` with `failed` / `BUSY`.
 - Honour `cancel` only while downloading (report `cancelled`); ignore it afterwards.
 - Commands are not retained: a device that is offline when the command is sent never
@@ -61,17 +93,22 @@ After an update reboots, publish a fresh status with the new `fw` **before** the
 ### OTA report — `P/dev/{id}/ota` (retained, QoS 1)
 
 ```json
-{ "jobId": "…", "phase": "downloading", "percent": 40, "ts": 1761400012345 }
+{ "jobId": "…", "phase": "downloading", "module": "lte", "percent": 40, "ts": 1761400012345 }
 ```
+
+`module` names the module a per-module phase (`downloading`, `verifying`, `installing`) is
+working on. `percent` is the progress of that module, not of the whole job. Include
+`module` on a `failed` report when the failure belongs to one module. Phases for the whole
+job (`accepted`, `rebooting`, `done`, `cancelled`) leave it out.
 
 | `phase` | Meaning | `percent` |
 |---|---|---|
 | `accepted` | Command received and validated, about to start | — |
-| `downloading` | Fetching the image | 0–100 |
-| `verifying` | Checking SHA-256 / signature | — |
-| `installing` | Writing to flash | 0–100 |
-| `rebooting` | About to reboot into the new image (going offline is expected) | — |
-| `done` | Running the new image (status already shows the new `fw`) | — |
+| `downloading` | Fetching `module`'s image | 0–100 |
+| `verifying` | Checking `module`'s SHA-256 / signature | — |
+| `installing` | Writing `module` to flash | 0–100 |
+| `rebooting` | About to reboot into the new images (going offline is expected) | — |
+| `done` | Running the new images (status already shows the new module versions) | — |
 | `failed` | Gave up; `error` is required | — |
 | `cancelled` | Stopped on a `cancel` command | — |
 
@@ -81,7 +118,7 @@ Report at least every few minutes while a phase is long-running; the UI marks a 
 Failure:
 
 ```json
-{ "jobId": "…", "phase": "failed", "ts": 1761400099000,
+{ "jobId": "…", "phase": "failed", "module": "lte", "ts": 1761400099000,
   "error": { "code": "CHECKSUM_MISMATCH", "phase": "verifying",
              "message": "sha256 mismatch", "detail": "optional free text" } }
 ```
@@ -99,7 +136,7 @@ verbatim, so keep it short and specific.
 | `LOW_BATTERY` | device | Battery too low to update safely |
 | `SIGNAL_LOST` | device | LTE connection dropped and the device gave up |
 | `FLASH_WRITE_FAILED` | device | Writing to flash failed |
-| `ROLLED_BACK` | device or UI | New image failed to boot; running the old version. The UI also raises it when a device reports `done` but its fresh status shows a different `fw` |
+| `ROLLED_BACK` | device or UI | New image failed to boot; running the old version. The UI also raises it when a device reports `done` but its fresh status shows a targeted module on another version, and names that module |
 | `BUSY` | device | Another job or a critical task is running |
 | `VERSION_REJECTED` | device | Version refused (e.g. anti-rollback) |
 | `NO_ACK` | UI | No report for this `jobId` within 60 s of sending |
@@ -107,8 +144,8 @@ verbatim, so keep it short and specific.
 
 Unknown codes are displayed as-is. A `failed` report without `error` is shown as `UNKNOWN`.
 
-A job succeeds only when the device reports `done` **and** its status shows
-`fw == version`.
+A job succeeds only when the device reports `done` **and** its status shows every module
+of the batch on the batch's version for it.
 
 ## UI side (UI ↔ UI)
 
@@ -120,7 +157,10 @@ These topics let several operator tabs share state without a backend. Devices ig
 {
   "id": "b-20261025-101500-x7k2", "name": "LT-100 1.5.0 wave 1",
   "createdAt": 1761400000000, "createdBy": "Ann",
-  "firmware": { "version": "1.5.0", "url": "…", "sha256": "…", "size": 1843200, "models": ["LT-100"], "notes": "" },
+  "firmware": [
+    { "module": "ble", "version": "3.2.0", "url": "…", "sha256": "…", "size": 412000, "models": [], "notes": "" },
+    { "module": "lte", "version": "2.1.0", "url": "…", "sha256": "…", "size": 3145728, "models": [], "notes": "" }
+  ],
   "maxInFlight": 50, "allowDowngrade": false, "archived": false,
   "rev": 17, "writer": "ota-ui-k3j9x2",
   "entries": {
@@ -131,8 +171,13 @@ These topics let several operator tabs share state without a backend. Devices ig
 }
 ```
 
+`firmware` holds one image per chosen module, in module order. A manifest written before
+modules existed has a single image object there; it is read as one MCU image.
+
 Entry `state`: `queued | dispatched | skipped | cancelled`. Skip `reason`: `offline |
-incompatible | up-to-date | busy | downgrade`. Everything finer (progress, success,
+incompatible | up-to-date | busy | downgrade`. `incompatible`: any chosen image does not
+list the device's model. `up-to-date`: every chosen module already runs its target.
+`downgrade`: a module that would be sent runs a newer version. Everything finer (progress, success,
 failure, timeouts) is derived from the device topics, never stored here.
 
 Job ids are `{batchId}:{deviceId}:{attempt}`.
@@ -151,11 +196,13 @@ the heartbeat is fresh, i.e. under 30 s old) by publishing a lease naming itself
 
 ```json
 { "rev": 3, "writer": "ota-ui-k3j9x2",
-  "entries": [ { "version": "1.5.0", "url": "…", "sha256": "…", "size": 1843200,
+  "entries": [ { "module": "mcu", "version": "1.5.0", "url": "…", "sha256": "…", "size": 1843200,
                  "models": ["LT-100"], "notes": "…" } ] }
 ```
 
-`models` empty means any model. Last writer wins.
+Each entry is an image for one module. An entry is identified by `module` and `version`
+together, so different modules may use the same version number. An entry without `module`
+is an MCU image. `models` empty means any model. Last writer wins.
 
 ## Broker requirements
 

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { batchViews, leaseIsStale, summarize } from '../../core/batch';
+import { firmwareLabel } from '../../core/catalog';
 import { StackedBar } from '../components/StackedBar';
 import { href, navigate, useEngineState } from '../hooks';
 import { S } from '../strings';
@@ -61,7 +62,7 @@ export function BatchesView({ archived }: { archived: boolean }) {
                     {m.name}
                   </a>
                 </span>
-                <span role="cell" className="mono">{m.firmware.version}</span>
+                <span role="cell" className="mono ellipsis" title={firmwareLabel(m.firmware)}>{firmwareLabel(m.firmware)}</span>
                 <span role="cell" className="muted">{S.ago(now - m.createdAt)}</span>
                 <span role="cell">{m.createdBy}</span>
                 <span role="cell" className="muted">{archived ? S.never : owner}</span>

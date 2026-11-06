@@ -3,9 +3,9 @@ import type { BatchManifest } from '../protocol/types';
 import { deviceJobIndex, deviceJobView } from './deviceView';
 import { DEFAULT_TIMEOUTS, type DeviceRecord } from './types';
 
-const fw = { version: '2.0.0', url: 'u', sha256: 's', size: 1, models: [], notes: '' };
+const fw = { module: 'lte' as const, version: '2.0.0', url: 'u', sha256: 's', size: 1, models: [], notes: '' };
 const batch = (id: string, createdAt: number, archived = false): BatchManifest => ({
-  id, name: id, createdAt, createdBy: '', firmware: fw, maxInFlight: 1, allowDowngrade: false,
+  id, name: id, createdAt, createdBy: '', firmware: [fw], maxInFlight: 1, allowDowngrade: false,
   archived, rev: 1, writer: '', entries: { d1: { state: 'queued', attempts: 0 } },
 });
 
@@ -27,7 +27,7 @@ describe('deviceJobView', () => {
   it('falls back to the raw report and trusts "done" without a batch', () => {
     const d: DeviceRecord = {
       id: 'd1',
-      status: { online: true, fw: '3.0.0', model: 'm', ts: now },
+      status: { online: true, fw: '3.0.0', model: 'm', ts: now, modules: { lte: '3.0.0' } },
       ota: { jobId: 'gone:d1:1', phase: 'done', ts: now },
     };
     expect(deviceJobView(d, undefined, new Map(), now, DEFAULT_TIMEOUTS)?.state).toBe('success');

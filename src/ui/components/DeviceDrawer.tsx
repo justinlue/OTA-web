@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
+import { firmwareLabel } from '../../core/catalog';
 import { deviceJobView } from '../../core/deviceView';
 import { explainError } from '../../protocol/errors';
+import { MODULES } from '../../protocol/types';
 import { href, useEngine, useEngineState, useJobIndex } from '../hooks';
 import { S } from '../strings';
 import { OnlineDot, OtaCell } from './OtaCell';
@@ -52,6 +54,20 @@ export function DeviceDrawer({ deviceId, onClose }: { deviceId: string; onClose:
         </dd>
         <dt>{S.drawer.firmware}</dt>
         <dd className="mono">{st?.fw || S.never}</dd>
+        {st && MODULES.some((m) => st.modules[m]) && (
+          <>
+            <dt>{S.drawer.modules}</dt>
+            <dd>
+              <ul className="module-versions">
+                {MODULES.filter((m) => st.modules[m]).map((m) => (
+                  <li key={m}>
+                    {S.module[m]} <span className="mono">{st.modules[m]}</span>
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </>
+        )}
         <dt>{S.drawer.lastSeen}</dt>
         <dd>{st?.ts ? `${S.ago(now - st.ts)} (${time(st.ts)})` : S.never}</dd>
       </dl>
@@ -68,7 +84,7 @@ export function DeviceDrawer({ deviceId, onClose }: { deviceId: string; onClose:
                   <a href={href.batch(batch.id)}>{batch.name}</a>
                 </dd>
                 <dt>{S.drawer.target}</dt>
-                <dd className="mono">{batch.firmware.version}</dd>
+                <dd className="mono">{firmwareLabel(batch.firmware)}</dd>
               </>
             )}
             <dt>{S.drawer.state}</dt>
@@ -97,7 +113,10 @@ export function DeviceDrawer({ deviceId, onClose }: { deviceId: string; onClose:
                 {err.phase && (
                   <>
                     <dt>{S.drawer.failedIn}</dt>
-                    <dd>{S.phase(err.phase)}</dd>
+                    <dd>
+                      {S.phase(err.phase)}
+                      {err.module && ` (${S.module[err.module]})`}
+                    </dd>
                   </>
                 )}
                 {err.message && (
@@ -141,6 +160,7 @@ export function DeviceDrawer({ deviceId, onClose }: { deviceId: string; onClose:
           {history.map((h, i) => (
             <li key={i} className={h.phase === 'failed' ? 'failed' : undefined}>
               <span className="mono small">{time(h.ts)}</span> {S.phase(h.phase)}
+              {h.module && ` ${S.module[h.module]}`}
               {h.percent !== undefined && ` ${h.percent}%`}
               {h.code && <span className="mono"> · {h.code}</span>}
             </li>

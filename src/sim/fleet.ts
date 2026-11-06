@@ -1,7 +1,16 @@
 // Simulated LTE fleet: each device is a MemoryClient on the shared in-memory broker and
 // speaks the real protocol, so the engine cannot tell it from hardware.
 import { topics } from '../protocol/topics';
-import type { DeviceCommand, FirmwareCatalog, OtaCommand, OtaError, OtaReport } from '../protocol/types';
+import {
+  MODULES,
+  type DeviceCommand,
+  type FirmwareCatalog,
+  type ModuleId,
+  type ModuleVersions,
+  type OtaCommand,
+  type OtaError,
+  type OtaReport,
+} from '../protocol/types';
 import type { MemoryBroker, MemoryClient } from '../transport/memory';
 
 export type SimConfig = {
@@ -17,18 +26,39 @@ export type SimConfig = {
 
 export const DEFAULT_SIM: SimConfig = { count: 200, flapRate: 0.05, failureRate: 0.15, speed: 10, seed: 42 };
 
-const MODELS = [
-  { model: 'LT-100', fw: ['1.4.2', '1.4.2', '1.4.2', '1.3.9'] },
-  { model: 'LT-200', fw: ['2.1.0', '2.1.0', '2.0.4'] },
+/** Version pools per module; each device draws one version per module. */
+const MODELS: { model: string; modules: Record<ModuleId, string[]> }[] = [
+  {
+    model: 'LT-100',
+    modules: {
+      ble: ['3.1.0', '3.1.0', '3.0.2'],
+      mcu: ['1.4.2', '1.4.2', '1.4.2', '1.3.9'],
+      lte: ['2.0.4', '2.0.4', '1.9.8'],
+      sensor: ['0.9.1', '0.9.1', '0.8.0'],
+    },
+  },
+  {
+    model: 'LT-200',
+    modules: {
+      ble: ['3.1.0', '3.0.2'],
+      mcu: ['2.1.0', '2.1.0', '2.0.4'],
+      lte: ['2.0.4', '1.9.8'],
+      sensor: ['1.2.0', '1.1.3'],
+    },
+  },
 ];
 
 export const SIM_CATALOG: FirmwareCatalog = {
   rev: 1,
   writer: 'simulator',
   entries: [
-    { version: '1.5.0', url: 'https://fw.example.com/lt100/1.5.0.bin', sha256: 'a3f1c2…e9', size: 1_843_200, models: ['LT-100'], notes: 'Modem stack update, power-save fixes.' },
-    { version: '1.3.9', url: 'https://fw.example.com/lt100/1.3.9.bin', sha256: '77b0d4…1c', size: 1_802_240, models: ['LT-100'], notes: 'Previous stable (for downgrade).' },
-    { version: '2.2.0', url: 'https://fw.example.com/lt200/2.2.0.bin', sha256: 'c91e0a…4f', size: 2_457_600, models: ['LT-200'], notes: 'New GNSS driver.' },
+    { module: 'mcu', version: '1.5.0', url: 'https://fw.example.com/lt100/mcu-1.5.0.bin', sha256: 'a3f1c2…e9', size: 1_843_200, models: ['LT-100'], notes: 'Power-save fixes.' },
+    { module: 'mcu', version: '1.3.9', url: 'https://fw.example.com/lt100/mcu-1.3.9.bin', sha256: '77b0d4…1c', size: 1_802_240, models: ['LT-100'], notes: 'Previous stable (for downgrade).' },
+    { module: 'mcu', version: '2.2.0', url: 'https://fw.example.com/lt200/mcu-2.2.0.bin', sha256: 'c91e0a…4f', size: 2_457_600, models: ['LT-200'], notes: 'New GNSS driver.' },
+    { module: 'ble', version: '3.2.0', url: 'https://fw.example.com/ble/ble-3.2.0.bin', sha256: '5e02b7…a0', size: 412_000, models: [], notes: 'Faster pairing.' },
+    { module: 'lte', version: '2.1.0', url: 'https://fw.example.com/lte/lte-2.1.0.bin', sha256: 'e4d8f1…77', size: 3_145_728, models: [], notes: 'Modem stack update.' },
+    { module: 'sensor', version: '0.9.2', url: 'https://fw.example.com/lt100/sensor-0.9.2.bin', sha256: '0b9c33…d2', size: 98_304, models: ['LT-100'], notes: 'Accelerometer calibration.' },
+    { module: 'sensor', version: '1.3.0', url: 'https://fw.example.com/lt200/sensor-1.3.0.bin', sha256: '9f1a6e…08', size: 131_072, models: ['LT-200'], notes: 'Temperature drift fix.' },
   ],
 };
 
@@ -66,7 +96,7 @@ class SimDevice {
   constructor(
     readonly id: string,
     readonly model: string,
-    public fw: string,
+    public modules: ModuleVersions,
     private flapper: boolean,
     private fleet: SimFleet,
   ) {
@@ -92,7 +122,8 @@ class SimDevice {
   }
 
   private statusPayload(online: boolean): string {
-    return JSON.stringify({ online, fw: this.fw, model: this.model, ts: Date.now() });
+    // The overall label follows the MCU image.
+    return JSON.stringify({ online, fw: this.modules.mcu ?? '', model: this.model, modules: this.modules, ts: Date.now() });
   }
 
   private async goOnline(): Promise<void> {
@@ -107,6 +138,10 @@ class SimDevice {
       if (!this.stopped) fn();
     }, ms / this.fleet.config.speed);
     this.timers.add(h);
+  }
+
+  private wait(ms: number): Promise<void> {
+    return new Promise((resolve) => this.after(ms, resolve));
   }
 
   private scheduleFlap(): void {
@@ -143,90 +178,83 @@ class SimDevice {
       this.report({ jobId: cmd.jobId, phase: 'failed', error: { code: 'BUSY', message: `already running ${this.job.id}`, phase: 'accepted' } });
       return;
     }
-    this.run(cmd);
+    void this.run(cmd);
   }
 
-  private run(cmd: OtaCommand): void {
+  /** One job: every listed module downloads, verifies and installs in turn; one reboot at the end. */
+  private async run(cmd: OtaCommand): Promise<void> {
+    const images = cmd.modules;
     const r = this.fleet.rand();
     const fails = r < this.fleet.config.failureRate;
     // One in nine failures is a device that never answers (the UI should call it NO_ACK).
     if (fails && this.fleet.rand() < 1 / 9) return;
     const failure = fails ? FAILURES[Math.floor(this.fleet.rand() * FAILURES.length)] : null;
     const failPct = 10 + Math.floor(this.fleet.rand() * 8) * 10;
+    const failAt = Math.floor(this.fleet.rand() * images.length);
     const job = { id: cmd.jobId, phase: 'accepted', percent: 0 };
     this.job = job;
     const live = () => this.job === job;
+    const failsIn = (i: number, phase: Failure['at']) => failure?.at === phase && i === failAt;
 
-    const fail = (phase: string) => {
+    const fail = (phase: string, module?: ModuleId) => {
       const error: OtaError = { code: failure!.code, message: failure!.message, phase };
       this.job = null;
-      this.report({ jobId: job.id, phase: 'failed', error });
+      this.report({ jobId: job.id, phase: 'failed', error, ...(module ? { module } : {}) });
     };
 
-    this.after(1000, () => {
-      if (!live()) return;
-      this.report({ phase: 'accepted' });
-      if (failure?.at === 'accepted') return this.after(1000, () => live() && fail('accepted'));
+    await this.wait(1000);
+    if (!live()) return;
+    this.report({ phase: 'accepted' });
+    if (failure?.at === 'accepted') {
+      await this.wait(1000);
+      if (live()) fail('accepted');
+      return;
+    }
+
+    for (const [i, { module }] of images.entries()) {
       job.phase = 'downloading';
-      this.download(job, 0, failure, failPct, live, fail, cmd);
-    });
-  }
-
-  private download(
-    job: { id: string; phase: string; percent: number },
-    pct: number,
-    failure: Failure | null,
-    failPct: number,
-    live: () => boolean,
-    fail: (phase: string) => void,
-    cmd: OtaCommand,
-  ): void {
-    this.after(3000, () => {
-      if (!live()) return;
-      if (failure?.at === 'downloading' && pct >= failPct) return fail('downloading');
-      job.percent = pct;
-      this.report({ phase: 'downloading', percent: pct });
-      if (pct < 100) return this.download(job, pct + 10, failure, failPct, live, fail, cmd);
-      job.phase = 'verifying';
-      this.after(2000, () => {
+      for (let pct = 0; pct <= 100; pct += 10) {
+        await this.wait(3000);
         if (!live()) return;
-        this.report({ phase: 'verifying' });
-        if (failure?.at === 'verifying') return this.after(1500, () => live() && fail('verifying'));
-        job.phase = 'installing';
-        this.install(job, 0, failure, failPct, live, fail, cmd);
-      });
-    });
-  }
-
-  private install(
-    job: { id: string; phase: string; percent: number },
-    pct: number,
-    failure: Failure | null,
-    failPct: number,
-    live: () => boolean,
-    fail: (phase: string) => void,
-    cmd: OtaCommand,
-  ): void {
-    this.after(2500, () => {
+        if (failsIn(i, 'downloading') && pct >= failPct) return fail('downloading', module);
+        job.percent = pct;
+        this.report({ phase: 'downloading', module, percent: pct });
+      }
+      job.phase = 'verifying';
+      await this.wait(2000);
       if (!live()) return;
-      if (failure?.at === 'installing' && pct >= failPct) return fail('installing');
-      this.report({ phase: 'installing', percent: pct });
-      if (pct < 100) return this.install(job, pct + 20, failure, failPct, live, fail, cmd);
-      job.phase = 'rebooting';
-      this.report({ phase: 'rebooting' });
-      this.after(500, () => {
-        this.client.kill();
-        this.after(15_000, async () => {
-          if (failure?.at !== 'rebooting') this.fw = cmd.version;
-          await this.goOnline();
-          if (failure?.at === 'rebooting') fail('rebooting');
-          else {
-            this.report({ phase: 'done', percent: 100 });
-            this.job = null;
-          }
-        });
-      });
+      this.report({ phase: 'verifying', module });
+      if (failsIn(i, 'verifying')) {
+        await this.wait(1500);
+        if (live()) fail('verifying', module);
+        return;
+      }
+      job.phase = 'installing';
+      for (let pct = 0; pct <= 100; pct += 20) {
+        await this.wait(2500);
+        if (!live()) return;
+        if (failsIn(i, 'installing') && pct >= failPct) return fail('installing', module);
+        this.report({ phase: 'installing', module, percent: pct });
+      }
+    }
+
+    job.phase = 'rebooting';
+    this.report({ phase: 'rebooting' });
+    await this.wait(500);
+    this.client.kill();
+    await this.wait(15_000);
+    // A rolled-back module keeps its old image; the others took.
+    const next = { ...this.modules };
+    images.forEach((img, i) => {
+      if (!failsIn(i, 'rebooting')) next[img.module] = img.version;
     });
+    this.modules = next;
+    await this.goOnline();
+    if (failure?.at === 'rebooting') fail('rebooting', images[failAt]?.module);
+    else {
+      this.report({ phase: 'done', percent: 100 });
+      this.job = null;
+    }
   }
 }
 
@@ -251,10 +279,14 @@ export class SimFleet {
     const starts: Promise<void>[] = [];
     for (let i = 0; i < this.config.count; i++) {
       const m = MODELS[i % MODELS.length];
-      const fw = m.fw[Math.floor(this.rand() * m.fw.length)];
+      const modules: ModuleVersions = {};
+      for (const mod of MODULES) {
+        const pool = m.modules[mod];
+        modules[mod] = pool[Math.floor(this.rand() * pool.length)];
+      }
       const flapper = this.rand() < this.config.flapRate;
       const id = `${m.model.toLowerCase()}-${String(i + 1).padStart(5, '0')}`;
-      const dev = new SimDevice(id, m.model, fw, flapper, this);
+      const dev = new SimDevice(id, m.model, modules, flapper, this);
       this.devices.push(dev);
       starts.push(dev.start(!flapper || this.rand() < 0.5));
     }

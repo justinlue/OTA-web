@@ -2,7 +2,8 @@
 
 Frontend-only OTA console for LTE devices: Vite + React + TypeScript. The browser talks
 MQTT over WebSocket straight to the broker; there is no backend. Design:
-`docs/superpowers/specs/2026-10-25-ota-webui-design.md`. Wire contract:
+`docs/superpowers/specs/2026-10-25-ota-webui-design.md`, extended by
+`2026-11-06-module-upgrades.md` (per-module upgrades). Wire contract:
 `docs/protocol.md`. Read both before changing behaviour.
 
 ## Commands
@@ -20,7 +21,8 @@ npm run build       # typecheck + static build into dist/
 - `src/core/`: pure logic. `jobState.ts` derives each device's effective state
   (including NO_ACK/STALLED/ROLLED_BACK) from the batch entry, the retained device
   topics and the clock. `dispatch.ts` handles throttled sending, retry and cancel.
-  `eligibility.ts` gives skip reasons. `batch.ts` has summaries and the lease constants.
+  `eligibility.ts` gives skip reasons and the images each device still needs. `batch.ts`
+  has summaries and the lease constants. `catalog.ts` has image identity and labels.
 - `src/transport/`: the `Transport` interface, the `mqtt.js` adapter, and the in-memory
   broker used by the simulator and tests.
 - `src/sim/`: simulated devices speaking the real protocol.

@@ -18,7 +18,7 @@ export function OtaCell({ view }: { view: JobView | null }) {
   if (view.terminal || view.state === 'queued') {
     return <span className={`badge badge-${view.state}`}>{label}</span>;
   }
-  const pct = view.percent !== undefined ? ` ${view.percent}%` : '';
+  const pct = (view.module ? ` ${S.module[view.module]}` : '') + (view.percent !== undefined ? ` ${view.percent}%` : '');
   return (
     <span className="ota-progress" title={`${label}${pct}`}>
       <span className="bar" aria-hidden>

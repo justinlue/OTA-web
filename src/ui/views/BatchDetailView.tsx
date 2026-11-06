@@ -1,6 +1,7 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useMemo, useRef, useState } from 'react';
 import { batchViews, IN_PROGRESS_STATES, inProgressCount, leaseIsStale, summarize } from '../../core/batch';
+import { firmwareLabel } from '../../core/catalog';
 import type { JobState, JobView } from '../../core/types';
 import { OnlineDot, OtaCell } from '../components/OtaCell';
 import { StackedBar } from '../components/StackedBar';
@@ -74,7 +75,7 @@ export function BatchDetailView({ id, onOpenDevice }: { id: string; onOpenDevice
       </a>
       <header className="view-head">
         <h1>{m.name}</h1>
-        <span className="mono">→ {m.firmware.version}</span>
+        <span className="mono">→ {firmwareLabel(m.firmware)}</span>
         <span className="muted small">
           {S.batch.created(new Date(m.createdAt).toLocaleString(), m.createdBy)} · {S.batch.maxInFlight(m.maxInFlight)}
         </span>

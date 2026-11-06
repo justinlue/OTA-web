@@ -1,14 +1,19 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useMemo, useRef, useState } from 'react';
 import { deviceJobView } from '../../core/deviceView';
+import { MODULES, type ModuleVersions } from '../../protocol/types';
 import { Modal } from '../components/Modal';
 import { OnlineDot, OtaCell } from '../components/OtaCell';
-import { StartOtaDialog } from '../components/StartOtaDialog';
+import { UpgradeDialog } from '../components/UpgradeDialog';
 import { filterRows, NO_FILTERS, parseIdList, type DeviceFilters, type DeviceRow } from '../deviceFilter';
 import { useEngineState, useJobIndex } from '../hooks';
 import { S } from '../strings';
 
 const ROW_H = 38;
+
+/** "BLE 3.1.0 · MCU 1.4.2 · …" for the firmware cell's tooltip. */
+const moduleSummary = (modules: ModuleVersions) =>
+  MODULES.filter((m) => modules[m]).map((m) => `${S.module[m]} ${modules[m]}`).join(' · ');
 
 export function DevicesView({ onOpenDevice }: { onOpenDevice: (id: string) => void }) {
   const devices = useEngineState((s) => s.devices);
@@ -107,7 +112,7 @@ export function DevicesView({ onOpenDevice }: { onOpenDevice: (id: string) => vo
         <button onClick={() => setPasteOpen(true)}>{S.devices.pasteIds}</button>
         <span className="spacer" />
         <button className="primary" disabled={selected.size === 0} onClick={() => setStartOpen(true)}>
-          {S.devices.startOta(selected.size)}
+          {S.devices.upgrade(selected.size)}
         </button>
       </div>
 
@@ -159,7 +164,7 @@ export function DevicesView({ onOpenDevice }: { onOpenDevice: (id: string) => vo
                     <span role="cell" className="mono">{device.id}</span>
                     <span role="cell">{st?.model || S.never}</span>
                     <span role="cell"><OnlineDot online={st?.online} /></span>
-                    <span role="cell" className="mono">{st?.fw || S.never}</span>
+                    <span role="cell" className="mono" title={st ? moduleSummary(st.modules) : undefined}>{st?.fw || S.never}</span>
                     <span role="cell"><OtaCell view={view} /></span>
                     <span role="cell" className="muted">{st?.online ? S.online : st?.ts ? S.ago(now - st.ts) : S.never}</span>
                   </div>
@@ -180,7 +185,7 @@ export function DevicesView({ onOpenDevice }: { onOpenDevice: (id: string) => vo
           }}
         />
       )}
-      {startOpen && <StartOtaDialog deviceIds={[...selected]} onClose={() => setStartOpen(false)} onStarted={() => setSelected(new Set())} />}
+      {startOpen && <UpgradeDialog deviceIds={[...selected]} onClose={() => setStartOpen(false)} onStarted={() => setSelected(new Set())} />}
     </section>
   );
 }

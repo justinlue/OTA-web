@@ -1,16 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { parseBatch, parseCatalog, parseLease, parseOtaReport, parseStatus } from './parse';
 
-const fw = { version: '2.0.0', url: 'https://cdn/x.bin', sha256: 'ab', size: 10, models: [], notes: '' };
+const fw = { module: 'lte', version: '2.0.0', url: 'https://cdn/x.bin', sha256: 'ab', size: 10, models: [], notes: '' };
 
 describe('parseStatus', () => {
-  it('accepts a well-formed status', () => {
-    expect(parseStatus('{"online":true,"fw":"1.0.0","model":"LT-100","ts":5}')).toEqual({
-      online: true,
-      fw: '1.0.0',
-      model: 'LT-100',
-      ts: 5,
-    });
+  it('accepts a well-formed status with per-module versions', () => {
+    const raw = { online: true, fw: '1.0.0', model: 'LT-100', ts: 5, modules: { ble: '3.1.0', mcu: '1.0.0', lte: '2.0.4', sensor: '0.9.1' } };
+    expect(parseStatus(JSON.stringify(raw))).toEqual(raw);
+  });
+
+  it('drops unknown modules and non-string versions', () => {
+    const s = parseStatus('{"online":true,"fw":"1","model":"m","ts":5,"modules":{"ble":"3.1.0","gps":"1.0","lte":7}}');
+    expect(s?.modules).toEqual({ ble: '3.1.0' });
+  });
+
+  it('reads a status without modules as the MCU running fw', () => {
+    expect(parseStatus('{"online":true,"fw":"1.0.0","model":"LT-100","ts":5}')?.modules).toEqual({ mcu: '1.0.0' });
   });
 
   it('rejects bad JSON and wrong field types', () => {
@@ -20,7 +25,7 @@ describe('parseStatus', () => {
   });
 
   it('tolerates a Last Will that only says offline, defaulting the rest', () => {
-    expect(parseStatus('{"online":false}')).toEqual({ online: false, fw: '', model: '', ts: 0 });
+    expect(parseStatus('{"online":false}')).toEqual({ online: false, fw: '', model: '', ts: 0, modules: {} });
   });
 });
 
@@ -36,6 +41,11 @@ describe('parseOtaReport', () => {
       '{"jobId":"j","phase":"failed","error":{"code":"LOW_BATTERY","message":"12%"},"ts":9}',
     );
     expect(failed?.error).toEqual({ code: 'LOW_BATTERY', message: '12%' });
+  });
+
+  it('keeps the module a multi-module job is working on', () => {
+    expect(parseOtaReport('{"jobId":"j","phase":"installing","module":"ble","percent":20,"ts":9}')?.module).toBe('ble');
+    expect(parseOtaReport('{"jobId":"j","phase":"installing","module":"gps","ts":9}')?.module).toBeUndefined();
   });
 
   it('rejects unknown phases and malformed errors', () => {
@@ -61,7 +71,7 @@ describe('parseBatch / parseLease / parseCatalog', () => {
     name: 'n',
     createdAt: 1,
     createdBy: 'op',
-    firmware: fw,
+    firmware: [fw],
     maxInFlight: 5,
     allowDowngrade: false,
     archived: false,
@@ -72,6 +82,18 @@ describe('parseBatch / parseLease / parseCatalog', () => {
 
   it('accepts a manifest', () => {
     expect(parseBatch(JSON.stringify(manifest))).toEqual(manifest);
+  });
+
+  it('reads a legacy single-image manifest as one MCU image', () => {
+    const { module: _, ...legacy } = fw;
+    const m = parseBatch(JSON.stringify({ ...manifest, firmware: legacy }));
+    expect(m?.firmware).toEqual([{ ...fw, module: 'mcu' }]);
+  });
+
+  it('rejects a manifest with an unknown module or the same module twice', () => {
+    expect(parseBatch(JSON.stringify({ ...manifest, firmware: [{ ...fw, module: 'gps' }] }))).toBeNull();
+    expect(parseBatch(JSON.stringify({ ...manifest, firmware: [fw, fw] }))).toBeNull();
+    expect(parseBatch(JSON.stringify({ ...manifest, firmware: [] }))).toBeNull();
   });
 
   it('rejects a manifest with a bad entry state', () => {
@@ -87,5 +109,8 @@ describe('parseBatch / parseLease / parseCatalog', () => {
     });
     expect(parseCatalog(JSON.stringify({ entries: [fw], rev: 2, writer: 'c1' }))?.entries).toHaveLength(1);
     expect(parseCatalog('{"entries":[{"version":1}],"rev":1,"writer":"c"}')).toBeNull();
+    // Entries written before modules existed are MCU images.
+    const { module: _, ...legacy } = fw;
+    expect(parseCatalog(JSON.stringify({ entries: [legacy], rev: 2, writer: 'c1' }))?.entries).toEqual([{ ...fw, module: 'mcu' }]);
   });
 });

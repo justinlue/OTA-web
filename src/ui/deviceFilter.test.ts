@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { filterRows, NO_FILTERS, parseIdList, type DeviceRow } from './deviceFilter';
 
 const row = (id: string, online: boolean, fw: string, model: string, state?: string): DeviceRow => ({
-  device: { id, status: { online, fw, model, ts: 0 } },
+  device: { id, status: { online, fw, model, ts: 0, modules: { mcu: fw } } },
   view: state ? ({ state, terminal: false, progress: 0 } as DeviceRow['view']) : null,
 });
 

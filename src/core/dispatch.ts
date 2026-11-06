@@ -1,7 +1,7 @@
 // Batch manifest transitions. Pure: the engine publishes the resulting manifest and commands.
 import type { BatchEntry, BatchManifest, OtaCommand } from '../protocol/types';
-import { checkEligibility } from './eligibility';
-import { jobView } from './jobState';
+import { checkEligibility, pendingImages } from './eligibility';
+import { jobView, targetVersions } from './jobState';
 import type { DeviceRecord, Timeouts } from './types';
 
 export type DispatchPlan = {
@@ -18,9 +18,10 @@ export function planDispatch(
   now: number,
   t: Timeouts,
 ): DispatchPlan {
+  const targets = targetVersions(m.firmware);
   let inFlight = 0;
   for (const [id, e] of Object.entries(m.entries)) {
-    if (e.state === 'dispatched' && !jobView(e, devices.get(id), m.firmware.version, now, t).terminal) inFlight++;
+    if (e.state === 'dispatched' && !jobView(e, devices.get(id), targets, now, t).terminal) inFlight++;
   }
   let slots = m.maxInFlight - inFlight;
   const entries: Record<string, BatchEntry> = { ...m.entries };
@@ -39,8 +40,10 @@ export function planDispatch(
     const attempts = e.attempts + 1;
     const jobId = jobIdFor(m.id, id, attempts);
     entries[id] = { state: 'dispatched', jobId, sentAt: now, attempts };
-    const { version, url, sha256, size } = m.firmware;
-    commands.push({ deviceId: id, command: { type: 'ota', jobId, version, url, sha256, size } });
+    const modules = pendingImages(devices.get(id), m.firmware).map(({ module, version, url, sha256, size }) => ({
+      module, version, url, sha256, size,
+    }));
+    commands.push({ deviceId: id, command: { type: 'ota', jobId, modules } });
     slots--;
   }
 

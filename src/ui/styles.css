@@ -388,7 +388,7 @@ button:focus-visible {
   grid-template-columns: minmax(160px, 2fr) 90px 100px 120px 120px minmax(200px, 2fr);
 }
 .firmware-table .tr {
-  grid-template-columns: 90px 140px 80px minmax(160px, 2fr) minmax(120px, 2fr) 130px;
+  grid-template-columns: 70px 90px 140px 80px minmax(160px, 2fr) minmax(120px, 2fr) 130px;
 }
 .row-actions {
   display: flex;
@@ -584,6 +584,36 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+fieldset.modules {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px 10px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+fieldset.modules legend {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 0 4px;
+}
+.module-row {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+}
+.module-row select {
+  min-width: 0;
+}
+.module-versions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 .form label,
 .settings label {

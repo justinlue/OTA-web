@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { BatchEntry, OtaReport } from '../protocol/types';
+import type { BatchEntry, ModuleVersions, OtaReport } from '../protocol/types';
 import { jobView } from './jobState';
 import { DEFAULT_TIMEOUTS, type DeviceRecord } from './types';
 
 const T = DEFAULT_TIMEOUTS;
-const TARGET = '2.0.0';
+const TARGET: ModuleVersions = { lte: '2.0.0' };
 const SENT = 1_000_000;
 const dispatched: BatchEntry = { state: 'dispatched', jobId: 'b:d1:1', sentAt: SENT, attempts: 1 };
 
-function dev(ota?: Partial<OtaReport>, fw = '1.0.0', statusTs = SENT - 5000): DeviceRecord {
+function dev(ota?: Partial<OtaReport>, lte = '1.0.0', statusTs = SENT - 5000, more: ModuleVersions = {}): DeviceRecord {
   return {
     id: 'd1',
-    status: { online: true, fw, model: 'm', ts: statusTs },
+    status: { online: true, fw: '9.0.0', model: 'm', ts: statusTs, modules: { lte, ble: '3.1.0', ...more } },
     ota: ota ? ({ jobId: 'b:d1:1', phase: 'accepted', ts: SENT + 100, ...ota } as OtaReport) : undefined,
   };
 }
@@ -43,6 +43,18 @@ describe('jobView', () => {
     expect(v.progress).toBeLessThan(60);
   });
 
+  it('keeps overall progress moving forward across the modules of one job', () => {
+    const targets: ModuleVersions = { ble: '3.2.0', lte: '2.0.0' };
+    const at = (ota: Partial<OtaReport>) => jobView(dispatched, dev(ota), targets, SENT + 1000, T).progress;
+    const bleInstalled = at({ phase: 'installing', module: 'ble', percent: 100 });
+    const lteStarting = at({ phase: 'downloading', module: 'lte', percent: 0 });
+    const lteHalf = at({ phase: 'installing', module: 'lte', percent: 50 });
+    expect(at({ phase: 'downloading', module: 'ble', percent: 50 })).toBeLessThan(bleInstalled);
+    expect(bleInstalled).toBeLessThanOrEqual(lteStarting);
+    expect(lteStarting).toBeLessThan(lteHalf);
+    expect(lteHalf).toBeLessThan(at({ phase: 'rebooting' }));
+  });
+
   it('marks a silent device STALLED, with a longer allowance while rebooting', () => {
     const late = SENT + 100 + T.stallMs + 1;
     const stalled = jobView(dispatched, dev({ phase: 'installing', percent: 10 }), TARGET, late, T);
@@ -61,7 +73,7 @@ describe('jobView', () => {
 
   it('needs done AND the target version in status for success', () => {
     const done = { phase: 'done' as const, ts: SENT + 5000 };
-    expect(jobView(dispatched, dev(done, TARGET, SENT + 5000), TARGET, SENT + 6000, T)).toMatchObject({
+    expect(jobView(dispatched, dev(done, '2.0.0', SENT + 5000), TARGET, SENT + 6000, T)).toMatchObject({
       state: 'success',
       progress: 100,
       terminal: true,
@@ -70,7 +82,26 @@ describe('jobView', () => {
     expect(jobView(dispatched, dev(done, '1.0.0', SENT - 1), TARGET, SENT + 6000, T).state).toBe('rebooting');
     // Fresh status still on the old version: rolled back.
     const rb = jobView(dispatched, dev(done, '1.0.0', SENT + 5000), TARGET, SENT + 6000, T);
-    expect(rb.error).toMatchObject({ code: 'ROLLED_BACK', phase: 'rebooting' });
+    expect(rb.error).toMatchObject({ code: 'ROLLED_BACK', phase: 'rebooting', message: 'LTE is running 1.0.0' });
+  });
+
+  it('needs every targeted module on its version, and names the ones that are not', () => {
+    const targets: ModuleVersions = { ble: '3.2.0', lte: '2.0.0' };
+    const done = { phase: 'done' as const, ts: SENT + 5000 };
+    const both = dev(done, '2.0.0', SENT + 5000, { ble: '3.2.0' });
+    expect(jobView(dispatched, both, targets, SENT + 6000, T).state).toBe('success');
+    const oneBack = dev(done, '2.0.0', SENT + 5000);
+    const rb = jobView(dispatched, oneBack, targets, SENT + 6000, T);
+    expect(rb.error).toMatchObject({ code: 'ROLLED_BACK', message: 'BLE is running 3.1.0', module: 'ble' });
+  });
+
+  it('carries the module a multi-module job is on, in progress and on failure', () => {
+    const v = jobView(dispatched, dev({ phase: 'installing', module: 'ble', percent: 20 }), TARGET, SENT + 1000, T);
+    expect(v).toMatchObject({ state: 'installing', module: 'ble' });
+    const f = dev({ phase: 'failed', module: 'lte', error: { code: 'FLASH_WRITE_FAILED', message: '', phase: 'installing' } });
+    expect(jobView(dispatched, f, TARGET, SENT + 1000, T).error).toMatchObject({ code: 'FLASH_WRITE_FAILED', module: 'lte' });
+    const quiet = dev({ phase: 'downloading', module: 'ble', percent: 10 });
+    expect(jobView(dispatched, quiet, TARGET, SENT + 100 + T.stallMs + 1, T).error).toMatchObject({ code: 'STALLED', module: 'ble' });
   });
 
   it('honours a device-side cancel', () => {

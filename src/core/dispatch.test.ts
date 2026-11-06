@@ -1,20 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import type { BatchManifest } from '../protocol/types';
+import type { BatchManifest, FirmwareEntry, ModuleVersions } from '../protocol/types';
 import { applyCancelQueued, applyRetry, planDispatch } from './dispatch';
 import { DEFAULT_TIMEOUTS, type DeviceRecord } from './types';
 
 const NOW = 1_000_000;
-const fw = { version: '2.0.0', url: 'https://cdn/fw.bin', sha256: 'abc', size: 42, models: [], notes: '' };
+const lte: FirmwareEntry = { module: 'lte', version: '2.0.0', url: 'https://cdn/fw.bin', sha256: 'abc', size: 42, models: [], notes: '' };
+const ble: FirmwareEntry = { module: 'ble', version: '3.2.0', url: 'https://cdn/ble.bin', sha256: 'def', size: 7, models: [], notes: '' };
 
-function manifest(entries: BatchManifest['entries'], maxInFlight = 2): BatchManifest {
+function manifest(entries: BatchManifest['entries'], maxInFlight = 2, firmware = [lte]): BatchManifest {
   return {
-    id: 'b1', name: 'b1', createdAt: 0, createdBy: 'op', firmware: fw, maxInFlight,
+    id: 'b1', name: 'b1', createdAt: 0, createdBy: 'op', firmware, maxInFlight,
     allowDowngrade: false, archived: false, rev: 1, writer: 'me', entries,
   };
 }
 
-function online(id: string, fw = '1.0.0'): DeviceRecord {
-  return { id, status: { online: true, fw, model: 'm', ts: NOW } };
+function online(id: string, modules: ModuleVersions = { lte: '1.0.0', ble: '3.1.0' }): DeviceRecord {
+  return { id, status: { online: true, fw: '1.0.0', model: 'm', ts: NOW, modules } };
 }
 
 const devices = (...recs: DeviceRecord[]) => new Map(recs.map((r) => [r.id, r]));
@@ -29,11 +30,21 @@ describe('planDispatch', () => {
     const plan = planDispatch(m, devices(online('d1'), online('d2'), online('d3')), NOW, DEFAULT_TIMEOUTS);
     expect(plan.commands.map((c) => c.deviceId)).toEqual(['d1', 'd2']);
     expect(plan.commands[0].command).toEqual({
-      type: 'ota', jobId: 'b1:d1:1', version: '2.0.0', url: 'https://cdn/fw.bin', sha256: 'abc', size: 42,
+      type: 'ota', jobId: 'b1:d1:1',
+      modules: [{ module: 'lte', version: '2.0.0', url: 'https://cdn/fw.bin', sha256: 'abc', size: 42 }],
     });
     expect(plan.manifest.entries.d1).toEqual({ state: 'dispatched', jobId: 'b1:d1:1', sentAt: NOW, attempts: 1 });
     expect(plan.manifest.entries.d3.state).toBe('queued');
     expect(plan.changed).toBe(true);
+  });
+
+  it('sends each device only the modules it still needs, in batch order', () => {
+    const m = manifest({ d1: { state: 'queued', attempts: 0 }, d2: { state: 'queued', attempts: 0 } }, 2, [ble, lte]);
+    const devs = devices(online('d1'), online('d2', { lte: '2.0.0', ble: '3.1.0' }));
+    const plan = planDispatch(m, devs, NOW, DEFAULT_TIMEOUTS);
+    const sent = (id: string) => plan.commands.find((c) => c.deviceId === id)!.command.modules.map((x) => x.module);
+    expect(sent('d1')).toEqual(['ble', 'lte']);
+    expect(sent('d2')).toEqual(['ble']);
   });
 
   it('counts unfinished dispatched entries against the limit', () => {

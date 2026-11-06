@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import type { FirmwareEntry } from '../../protocol/types';
+import { firmwareLabel, sameImage, type ImageKey } from '../../core/catalog';
+import { compareVersions } from '../../core/versions';
+import { MODULES, type FirmwareEntry, type ModuleId } from '../../protocol/types';
 import { Modal } from '../components/Modal';
 import { useEngine, useEngineState } from '../hooks';
 import { S } from '../strings';
 
-type Draft = { version: string; url: string; sha256: string; size: string; models: string; notes: string };
+type Draft = { module: string; version: string; url: string; sha256: string; size: string; models: string; notes: string };
 
 const toDraft = (e?: FirmwareEntry): Draft => ({
+  module: e?.module ?? '',
   version: e?.version ?? '',
   url: e?.url ?? '',
   sha256: e?.sha256 ?? '',
@@ -16,16 +19,24 @@ const toDraft = (e?: FirmwareEntry): Draft => ({
 });
 
 /** Validate a draft; returns the entry or the first problem. */
-export function validateDraft(d: Draft, existing: readonly string[], editing?: string): FirmwareEntry | string {
+export function validateDraft(d: Draft, existing: readonly ImageKey[], editing?: ImageKey): FirmwareEntry | string {
+  if (!MODULES.includes(d.module as ModuleId)) return S.firmware.errors.module;
+  const module = d.module as ModuleId;
   const version = d.version.trim();
   if (!version) return S.firmware.errors.version;
-  if (version !== editing && existing.includes(version)) return S.firmware.errors.duplicate;
+  const key = { module, version };
+  if (!(editing && sameImage(key, editing)) && existing.some((e) => sameImage(e, key))) return S.firmware.errors.duplicate;
   if (!/^https?:\/\//i.test(d.url.trim())) return S.firmware.errors.url;
   if (!d.sha256.trim()) return S.firmware.errors.sha256;
   const size = Number(d.size);
   if (!Number.isInteger(size) || size <= 0) return S.firmware.errors.size;
   const models = d.models.split(',').map((m) => m.trim()).filter(Boolean);
-  return { version, url: d.url.trim(), sha256: d.sha256.trim(), size, models, notes: d.notes.trim() };
+  return { module, version, url: d.url.trim(), sha256: d.sha256.trim(), size, models, notes: d.notes.trim() };
+}
+
+/** Grouped by module (in module order), then newest version first. */
+function sortedEntries(entries: readonly FirmwareEntry[]): FirmwareEntry[] {
+  return [...entries].sort((a, b) => MODULES.indexOf(a.module) - MODULES.indexOf(b.module) || compareVersions(b.version, a.version));
 }
 
 export function FirmwareView() {
@@ -48,6 +59,7 @@ export function FirmwareView() {
       ) : (
         <div className="table firmware-table" role="table">
           <div className="tr th" role="row">
+            <span role="columnheader">{S.firmware.cols.module}</span>
             <span role="columnheader">{S.firmware.cols.version}</span>
             <span role="columnheader">{S.firmware.cols.models}</span>
             <span role="columnheader">{S.firmware.cols.size}</span>
@@ -55,8 +67,9 @@ export function FirmwareView() {
             <span role="columnheader">{S.firmware.cols.notes}</span>
             <span role="columnheader" />
           </div>
-          {catalog.entries.map((e) => (
-            <div key={e.version} className="tr" role="row">
+          {sortedEntries(catalog.entries).map((e) => (
+            <div key={`${e.module}/${e.version}`} className="tr" role="row">
+              <span role="cell">{S.module[e.module]}</span>
               <span role="cell" className="mono">{e.version}</span>
               <span role="cell">{e.models.length ? e.models.join(', ') : S.firmware.anyModel}</span>
               <span role="cell">{S.bytes(e.size)}</span>
@@ -68,7 +81,7 @@ export function FirmwareView() {
                 </button>
                 <button
                   className="small-btn danger"
-                  onClick={() => confirm(S.firmware.confirmDelete(e.version)) && engine.deleteFirmware(e.version)}
+                  onClick={() => confirm(S.firmware.confirmDelete(firmwareLabel([e]))) && engine.deleteFirmware(e)}
                 >
                   {S.firmware.delete}
                 </button>
@@ -80,10 +93,10 @@ export function FirmwareView() {
       {editing && (
         <FirmwareForm
           entry={editing === 'new' ? undefined : editing}
-          existing={catalog.entries.map((e) => e.version)}
+          existing={catalog.entries}
           onClose={() => setEditing(null)}
           onSave={(entry) => {
-            engine.saveFirmware(entry, editing === 'new' ? undefined : editing.version);
+            engine.saveFirmware(entry, editing === 'new' ? undefined : editing);
             setEditing(null);
           }}
         />
@@ -99,7 +112,7 @@ function FirmwareForm({
   onSave,
 }: {
   entry?: FirmwareEntry;
-  existing: string[];
+  existing: readonly ImageKey[];
   onClose: () => void;
   onSave: (e: FirmwareEntry) => void;
 }) {
@@ -113,17 +126,30 @@ function FirmwareForm({
     </label>
   );
   return (
-    <Modal title={entry ? `${S.firmware.edit} ${entry.version}` : S.firmware.add} onClose={onClose}>
+    <Modal title={entry ? `${S.firmware.edit} ${firmwareLabel([entry])}` : S.firmware.add} onClose={onClose}>
       <form
         className="form"
         onSubmit={(e) => {
           e.preventDefault();
-          const r = validateDraft(d, existing, entry?.version);
+          const r = validateDraft(d, existing, entry);
           if (typeof r === 'string') setError(r);
           else onSave(r);
         }}
       >
-        {field('version', f.version, { autoFocus: true, className: 'mono' })}
+        <label>
+          {f.module}
+          <select value={d.module} onChange={(e) => setD({ ...d, module: e.target.value })} autoFocus>
+            <option value="" disabled>
+              {S.firmware.form.pickModule}
+            </option>
+            {MODULES.map((m) => (
+              <option key={m} value={m}>
+                {S.module[m]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {field('version', f.version, { className: 'mono' })}
         {field('url', f.url, { className: 'mono', placeholder: 'https://' })}
         {field('sha256', f.sha256, { className: 'mono' })}
         {field('size', f.size, { inputMode: 'numeric' })}

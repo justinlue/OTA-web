@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS } from '../../engine/settings';
 import { EngineContext } from '../hooks';
 import { DeviceDrawer } from './DeviceDrawer';
 
-const fw = { version: '2.0.0', url: 'u', sha256: 's', size: 1, models: [], notes: '' };
+const fw = { module: 'lte' as const, version: '2.0.0', url: 'u', sha256: 's', size: 1, models: [], notes: '' };
 
 function engineWithFailure() {
   const engine = new OtaEngine(DEFAULT_SETTINGS, () => {
@@ -21,7 +21,7 @@ function engineWithFailure() {
         'd1',
         {
           id: 'd1',
-          status: { online: true, fw: '1.0.0', model: 'LT-100', ts: now },
+          status: { online: true, fw: '1.0.0', model: 'LT-100', ts: now, modules: { lte: '1.0.0' } },
           ota: { jobId: 'b1:d1:1', phase: 'failed', ts: now, error: { code: 'LOW_BATTERY', message: 'battery 9%', phase: 'accepted' } },
         },
       ],
@@ -30,7 +30,7 @@ function engineWithFailure() {
       [
         'b1',
         {
-          id: 'b1', name: 'Wave 1', createdAt: now, createdBy: 'Ann', firmware: fw, maxInFlight: 5,
+          id: 'b1', name: 'Wave 1', createdAt: now, createdBy: 'Ann', firmware: [fw], maxInFlight: 5,
           allowDowngrade: false, archived: false, rev: 1, writer: clientId,
           entries: { d1: { state: 'dispatched', jobId: 'b1:d1:1', sentAt: now, attempts: 1 } },
         },

@@ -1,5 +1,5 @@
 import type { BatchLease, BatchManifest } from '../protocol/types';
-import { jobView } from './jobState';
+import { jobView, targetVersions } from './jobState';
 import type { DeviceRecord, JobState, JobView, Timeouts } from './types';
 
 export const LEASE_HEARTBEAT_MS = 10_000;
@@ -25,7 +25,8 @@ export function batchViews(
   t: Timeouts,
 ): Map<string, JobView> {
   const out = new Map<string, JobView>();
-  for (const [id, e] of Object.entries(m.entries)) out.set(id, jobView(e, devices.get(id), m.firmware.version, now, t));
+  const targets = targetVersions(m.firmware);
+  for (const [id, e] of Object.entries(m.entries)) out.set(id, jobView(e, devices.get(id), targets, now, t));
   return out;
 }
 

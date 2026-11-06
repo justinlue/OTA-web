@@ -3,18 +3,19 @@
 // store and calls the actions; everything here is testable without a DOM.
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { batchViews, LEASE_HEARTBEAT_MS, leaseIsStale, summarize } from '../core/batch';
+import { firmwareLabel, sameImage, type ImageKey } from '../core/catalog';
 import { applyCancelQueued, applyRetry, planDispatch } from '../core/dispatch';
 import type { DeviceRecord, JobView } from '../core/types';
 import { parseBatch, parseCatalog, parseLease, parseOtaReport, parseStatus } from '../protocol/parse';
 import { parseTopic, topics } from '../protocol/topics';
-import type { BatchLease, BatchManifest, FirmwareCatalog, FirmwareEntry } from '../protocol/types';
+import type { BatchLease, BatchManifest, FirmwareCatalog, FirmwareEntry, ModuleId } from '../protocol/types';
 import { SimFleet } from '../sim/fleet';
 import { MemoryBroker } from '../transport/memory';
 import { MqttTransport } from '../transport/mqtt';
 import type { ConnState, Transport } from '../transport/types';
 import { saveSettings, type Settings } from './settings';
 
-export type HistoryItem = { ts: number; phase: string; percent?: number; code?: string };
+export type HistoryItem = { ts: number; phase: string; module?: ModuleId; percent?: number; code?: string };
 
 export type Toast = { id: number; kind: 'error' | 'success' | 'info'; text: string; batchId?: string };
 
@@ -37,7 +38,8 @@ export type EngineState = {
 
 export type StartBatchInput = {
   name: string;
-  firmware: FirmwareEntry;
+  /** One image per module, in install order. */
+  firmware: FirmwareEntry[];
   deviceIds: string[];
   maxInFlight: number;
   allowDowngrade: boolean;
@@ -227,10 +229,10 @@ export class OtaEngine {
           history ??= new Map(st.history);
           const items = history.get(p.deviceId) ?? [];
           const last = items[items.length - 1];
-          if (!last || last.phase !== ota.phase || last.ts !== ota.ts) {
-            const item: HistoryItem = { ts: ota.ts, phase: ota.phase, percent: ota.percent, code: ota.error?.code };
-            const same = last && last.phase === ota.phase;
-            // Progress within a phase replaces the previous item instead of growing the list.
+          if (!last || last.phase !== ota.phase || last.module !== ota.module || last.ts !== ota.ts) {
+            const item: HistoryItem = { ts: ota.ts, phase: ota.phase, module: ota.module, percent: ota.percent, code: ota.error?.code };
+            const same = last && last.phase === ota.phase && last.module === ota.module;
+            // Progress within a phase (of the same module) replaces the previous item instead of growing the list.
             const next = same ? [...items.slice(0, -1), item] : [...items, item];
             history.set(p.deviceId, next.slice(-HISTORY_CAP));
           }
@@ -396,7 +398,7 @@ export class OtaEngine {
     for (const d of input.deviceIds) entries[d] = { state: 'queued', attempts: 0 };
     const m: BatchManifest = {
       id,
-      name: input.name.trim() || `${input.firmware.version} × ${input.deviceIds.length}`,
+      name: input.name.trim() || `${firmwareLabel(input.firmware)} × ${input.deviceIds.length}`,
       createdAt: now,
       createdBy: this.s.settings.conn.operator || this.s.clientId,
       firmware: input.firmware,
@@ -468,15 +470,15 @@ export class OtaEngine {
     return m ? batchViews(m, this.s.devices, this.s.now, this.s.settings.timeouts) : new Map();
   }
 
-  /** Add or replace (by `replaces`, else by version) a catalog entry. */
-  saveFirmware(entry: FirmwareEntry, replaces?: string): void {
-    const key = replaces ?? entry.version;
-    const entries = this.s.catalog.entries.filter((e) => e.version !== key && e.version !== entry.version);
+  /** Add or replace (the `replaces` entry, else the same module and version) a catalog entry. */
+  saveFirmware(entry: FirmwareEntry, replaces?: ImageKey): void {
+    const key = replaces ?? entry;
+    const entries = this.s.catalog.entries.filter((e) => !sameImage(e, key) && !sameImage(e, entry));
     this.writeCatalog([...entries, entry]);
   }
 
-  deleteFirmware(version: string): void {
-    this.writeCatalog(this.s.catalog.entries.filter((e) => e.version !== version));
+  deleteFirmware(key: ImageKey): void {
+    this.writeCatalog(this.s.catalog.entries.filter((e) => !sameImage(e, key)));
   }
 
   private writeCatalog(entries: FirmwareEntry[]): void {

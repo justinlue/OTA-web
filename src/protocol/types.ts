@@ -21,6 +21,17 @@ export const DEVICE_PHASES: readonly DevicePhase[] = [
   'cancelled',
 ];
 
+/** Separately upgradable parts of a device. Order is install order within one job. */
+export type ModuleId = 'ble' | 'mcu' | 'lte' | 'sensor';
+
+export const MODULES: readonly ModuleId[] = ['ble', 'mcu', 'lte', 'sensor'];
+
+/** Running version per module, as far as the device reports it. */
+export type ModuleVersions = Partial<Record<ModuleId, string>>;
+
+/** Names operators see for each module. */
+export const MODULE_LABELS: Record<ModuleId, string> = { ble: 'BLE', mcu: 'MCU', lte: 'LTE', sensor: 'Sensor' };
+
 export const DEVICE_ERROR_CODES = [
   'DOWNLOAD_FAILED',
   'CHECKSUM_MISMATCH',
@@ -41,33 +52,46 @@ export type OtaError = {
   message: string;
   /** The phase the update was in when it failed. */
   phase?: string;
+  /** The module being updated when it failed (from the report, or the rolled-back module). */
+  module?: ModuleId;
   detail?: string;
 };
 
 /** `P/dev/{id}/status`, retained, also the device's Last Will. */
 export type DeviceStatus = {
   online: boolean;
+  /** Overall firmware label, for display only; upgrades go by `modules`. */
   fw: string;
   model: string;
   ts: number;
+  modules: ModuleVersions;
 };
 
 /** `P/dev/{id}/ota`, retained: the device's latest OTA report. */
 export type OtaReport = {
   jobId: string;
   phase: DevicePhase;
+  /** The module a multi-module job is working on. */
+  module?: ModuleId;
   percent?: number;
   error?: OtaError;
   ts: number;
 };
 
-export type OtaCommand = {
-  type: 'ota';
-  jobId: string;
+/** One module image as sent to a device. */
+export type ModuleImage = {
+  module: ModuleId;
   version: string;
   url: string;
   sha256: string;
   size: number;
+};
+
+export type OtaCommand = {
+  type: 'ota';
+  jobId: string;
+  /** Installed in this order, as one job with one reboot at the end. */
+  modules: ModuleImage[];
 };
 
 export type CancelCommand = { type: 'cancel'; jobId: string };
@@ -75,6 +99,7 @@ export type CancelCommand = { type: 'cancel'; jobId: string };
 export type DeviceCommand = OtaCommand | CancelCommand;
 
 export type FirmwareEntry = {
+  module: ModuleId;
   version: string;
   url: string;
   sha256: string;
@@ -107,7 +132,8 @@ export type BatchManifest = {
   name: string;
   createdAt: number;
   createdBy: string;
-  firmware: FirmwareEntry;
+  /** One image per module, in install order; no module twice. */
+  firmware: FirmwareEntry[];
   maxInFlight: number;
   allowDowngrade: boolean;
   archived: boolean;

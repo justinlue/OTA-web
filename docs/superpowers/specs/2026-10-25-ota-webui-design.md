@@ -2,6 +2,9 @@
 
 Date: 2026-10-25. Status: agreed (grilling session, three rounds).
 
+> Extended 2026-11-06 by `2026-11-06-module-upgrades.md`: upgrades now go module by module
+> (BLE, MCU, LTE, Sensor), replacing the single firmware image described below.
+
 A frontend-only web app for pushing firmware OTA updates to LTE devices, singly
 or in batches, and following each update to completion. There is no backend we
 write: the browser talks straight to an MQTT broker over WebSocket (WSS), and
